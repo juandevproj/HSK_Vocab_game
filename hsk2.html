@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>HSK2 · Swipe Match</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet">
+<style>
+    :root {
+        --red: #a3131f;
+        --red-dark: #7c0f19;
+        --red-deep: #5c0b13;
+        --gold: #d4af37;
+        --gold-light: #f2d97d;
+        --paper: #fbf3e2;
+        --ink: #2b1a12;
+        --pinyin-grey: #9a958d;
+        --match: #2f7a4f;
+        --wrong: #1a1a1a;
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    html, body {
+        height: 100%;
+        overscroll-behavior: none;
+    }
+
+    body {
+        margin: 0;
+        height: 100dvh;
+        overflow: hidden;
+        font-family: 'Noto Serif SC', serif;
+        color: var(--ink);
+        background:
+            radial-gradient(circle at 15% 20%, rgba(212, 175, 55, 0.16), transparent 40%),
+            radial-gradient(circle at 85% 80%, rgba(212, 175, 55, 0.14), transparent 45%),
+            linear-gradient(160deg, var(--red-deep), var(--red) 55%, var(--red-dark));
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Top bar */
+    .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: max(14px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 10px max(18px, env(safe-area-inset-left));
+        flex-shrink: 0;
+        z-index: 5;
+    }
+
+    .topbar a {
+        color: var(--gold-light);
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        border: 1.5px solid rgba(242, 217, 125, 0.5);
+        border-radius: 8px;
+        padding: 6px 12px;
+    }
+
+    .progress {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 13px;
+        letter-spacing: 1px;
+        color: var(--gold-light);
+        opacity: 0.9;
+    }
+
+    /* Stage: split left/right drop zones with the draggable card layered on top */
+    .stage {
+        position: relative;
+        flex: 1;
+        display: flex;
+        min-height: 0;
+    }
+
+    .zone {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        padding: 18px 12px;
+        transition: background 0.15s ease;
+    }
+
+    .zone.left {
+        justify-content: flex-start;
+        border-right: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .zone.right {
+        justify-content: flex-end;
+    }
+
+    .zone .word {
+        font-size: clamp(13px, 3.6vw, 18px);
+        font-weight: 700;
+        color: var(--paper);
+        text-wrap: balance;
+        max-width: 22vw;
+        line-height: 1.35;
+        transition: transform 0.15s ease;
+    }
+
+    .zone.left .word { text-align: left; }
+    .zone.right .word { text-align: right; }
+
+    .zone.active {
+        background: rgba(212, 175, 55, 0.3);
+    }
+
+    .zone.active .word {
+        transform: scale(1.08);
+    }
+
+    .card-layer {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+    }
+
+    .card {
+        pointer-events: auto;
+        position: relative;
+        width: min(42vw, 180px);
+        background: var(--paper);
+        border: 3px solid var(--gold);
+        border-radius: 18px;
+        padding: 22px 8px;
+        text-align: center;
+        box-shadow: 0 16px 34px rgba(0, 0, 0, 0.38);
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+        transform: translate(0, 0) rotate(0deg);
+    }
+
+    .card:active { cursor: grabbing; }
+
+    .card.entering {
+        animation: pop-in 0.18s ease;
+    }
+
+    @keyframes pop-in {
+        from { transform: scale(0.85); opacity: 0; }
+        to { transform: scale(1); opacity: 1; }
+    }
+
+    .chinese-char {
+        font-size: clamp(38px, 11vw, 60px);
+        font-weight: 900;
+        color: #0c0c0c;
+        line-height: 1.15;
+    }
+
+    .pinyin {
+        margin-top: 10px;
+        font-size: 16px;
+        color: var(--pinyin-grey);
+        letter-spacing: 0.5px;
+    }
+
+    .feedback-stamp {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) rotate(-8deg) scale(0.8);
+        font-family: 'Noto Serif SC', serif;
+        font-weight: 900;
+        font-size: clamp(30px, 11vw, 56px);
+        letter-spacing: 2px;
+        padding: 10px 22px;
+        border: 5px solid currentColor;
+        border-radius: 14px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.12s ease, transform 0.12s ease;
+        z-index: 6;
+    }
+
+    .feedback-stamp.show {
+        opacity: 0.94;
+        transform: translate(-50%, -50%) rotate(-8deg) scale(1);
+    }
+
+    .feedback-stamp.match { color: var(--match); }
+    .feedback-stamp.wrong { color: var(--wrong); }
+
+    .hint {
+        text-align: center;
+        font-size: 11px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: rgba(242, 217, 125, 0.6);
+        padding: 8px 0 max(14px, env(safe-area-inset-bottom));
+        flex-shrink: 0;
+    }
+
+    /* Finished screen */
+    .finished {
+        position: fixed;
+        inset: 0;
+        background: linear-gradient(160deg, var(--red-deep), var(--red) 55%, var(--red-dark));
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        text-align: center;
+        padding: 24px;
+        z-index: 10;
+    }
+
+    .finished .dragon {
+        font-size: clamp(64px, 22vw, 110px);
+        filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.5));
+    }
+
+    .finished h1 {
+        font-family: 'Ma Shan Zheng', cursive;
+        font-weight: 400;
+        font-size: clamp(42px, 15vw, 68px);
+        margin: 6px 0 0;
+        color: var(--gold-light);
+        letter-spacing: 4px;
+    }
+
+    .finished .sub {
+        font-size: 12px;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: rgba(242, 217, 125, 0.75);
+        margin-bottom: 10px;
+    }
+
+    .finished .actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 14px;
+    }
+
+    .finished .actions a {
+        color: var(--gold-light);
+        border: 1.5px solid var(--gold);
+        padding: 10px 18px;
+        border-radius: 10px;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    [hidden] { display: none !important; }
+
+    @media (prefers-reduced-motion: reduce) {
+        .card, .zone, .zone .word, .feedback-stamp { transition: none !important; animation: none !important; }
+    }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <a href="index.html">← HSK</a>
+    <div class="progress" id="progress">0 / 0</div>
+</div>
+
+<div class="stage" id="stage">
+    <div class="zone left" id="zone-left">
+        <div class="word" id="word-left"></div>
+    </div>
+    <div class="zone right" id="zone-right">
+        <div class="word" id="word-right"></div>
+    </div>
+
+    <div class="card-layer">
+        <div class="card" id="card">
+            <div class="chinese-char" id="chinese-char"></div>
+            <div class="pinyin" id="pinyin-text"></div>
+        </div>
+        <div class="feedback-stamp" id="feedback"></div>
+    </div>
+</div>
+
+<div class="hint">Swipe or drag the card to the matching translation</div>
+
+<div class="finished" id="finished-screen" hidden>
+    <div class="dragon">🐉</div>
+    <h1>FINISHED</h1>
+    <div class="sub">All HSK2 words matched</div>
+    <div class="actions">
+        <a href="#" id="play-again">↺ Play again</a>
+        <a href="index.html">← Home</a>
+    </div>
+</div>
+
+<script>
+(function () {
+    var allWords = [];
+    var queue = [];
+    var pendingRetries = []; // [{ word, counter }] — counter = draws left before this word must reappear
+    var totalWords = 0;
+    var correctCount = 0;
+    var currentWord = null;
+    var currentPair = null;
+    var locked = true;
+
+    var stage = document.getElementById('stage');
+    var card = document.getElementById('card');
+    var chineseEl = document.getElementById('chinese-char');
+    var pinyinEl = document.getElementById('pinyin-text');
+    var zoneLeft = document.getElementById('zone-left');
+    var zoneRight = document.getElementById('zone-right');
+    var wordLeft = document.getElementById('word-left');
+    var wordRight = document.getElementById('word-right');
+    var progressEl = document.getElementById('progress');
+    var feedbackEl = document.getElementById('feedback');
+    var finishedScreen = document.getElementById('finished-screen');
+    var playAgainLink = document.getElementById('play-again');
+
+    function shuffle(arr) {
+        var a = arr.slice();
+        for (var i = a.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+        }
+        return a;
+    }
+
+    function updateProgress() {
+        progressEl.textContent = correctCount + ' / ' + totalWords;
+    }
+
+    function pickDecoy(correctWord) {
+        var pool = allWords.filter(function (w) {
+            return w.chinese !== correctWord.chinese &&
+                w.english && w.english !== '-' &&
+                w.english.toLowerCase() !== correctWord.english.toLowerCase();
+        });
+        return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    function setCardTransform(dx, dy, animated) {
+        card.style.transition = animated ? 'transform 0.28s ease, opacity 0.28s ease' : 'none';
+        card.style.transform = 'translate(' + dx + 'px, ' + (dy || 0) + 'px) rotate(' + (dx / 18) + 'deg)';
+    }
+
+    function resetCardPosition() {
+        card.classList.remove('entering');
+        card.style.opacity = '1';
+        setCardTransform(0, 0, true);
+        void card.offsetWidth;
+        card.classList.add('entering');
+    }
+
+    function clearZoneHighlight() {
+        zoneLeft.classList.remove('active');
+        zoneRight.classList.remove('active');
+    }
+
+    function updateZoneHighlight(dx) {
+        if (dx > 36) {
+            zoneRight.classList.add('active');
+            zoneLeft.classList.remove('active');
+        } else if (dx < -36) {
+            zoneLeft.classList.add('active');
+            zoneRight.classList.remove('active');
+        } else {
+            clearZoneHighlight();
+        }
+    }
+
+    function showFeedback(text, isMatch) {
+        feedbackEl.textContent = text;
+        feedbackEl.className = 'feedback-stamp show ' + (isMatch ? 'match' : 'wrong');
+        setTimeout(function () {
+            feedbackEl.className = 'feedback-stamp';
+        }, 550);
+    }
+
+    function drawNext() {
+        for (var i = 0; i < pendingRetries.length; i++) pendingRetries[i].counter--;
+        var dueIndex = pendingRetries.findIndex(function (r) { return r.counter <= 0; });
+        if (dueIndex !== -1) return pendingRetries.splice(dueIndex, 1)[0].word;
+        if (queue.length > 0) return queue.shift();
+        if (pendingRetries.length > 0) return pendingRetries.shift().word;
+        return null;
+    }
+
+    function nextWord() {
+        var word = drawNext();
+        if (!word) {
+            showFinished();
+            return;
+        }
+        currentWord = word;
+        var decoy = pickDecoy(currentWord);
+        var correctOnLeft = Math.random() < 0.5;
+        currentPair = {
+            left: correctOnLeft ? currentWord.english : decoy.english,
+            right: correctOnLeft ? decoy.english : currentWord.english,
+            correctSide: correctOnLeft ? 'left' : 'right'
+        };
+
+        chineseEl.textContent = currentWord.chinese;
+        pinyinEl.textContent = currentWord.pinyin;
+        wordLeft.textContent = currentPair.left;
+        wordRight.textContent = currentPair.right;
+
+        resetCardPosition();
+        clearZoneHighlight();
+        updateProgress();
+        locked = false;
+    }
+
+    function resolve(side) {
+        if (locked || !currentWord) return;
+        locked = true;
+        clearZoneHighlight();
+
+        var correct = side === currentPair.correctSide;
+        var flyX = side === 'left' ? -window.innerWidth : window.innerWidth;
+        setCardTransform(flyX, 40, true);
+        card.style.opacity = '0';
+
+        if (correct) {
+            correctCount++;
+            showFeedback('MATCH', true);
+        } else {
+            showFeedback('WRONG', false);
+            pendingRetries.push({ word: currentWord, counter: 1 + Math.floor(Math.random() * 2) });
+        }
+
+        updateProgress();
+        setTimeout(nextWord, 480);
+    }
+
+    function showFinished() {
+        finishedScreen.hidden = false;
+    }
+
+    /* Pointer-based swipe (unifies touch + mouse) */
+    var dragging = false;
+    var startX = 0;
+    var dx = 0;
+
+    card.addEventListener('pointerdown', function (e) {
+        if (locked) return;
+        dragging = true;
+        startX = e.clientX;
+        dx = 0;
+        card.setPointerCapture(e.pointerId);
+        card.style.transition = 'none';
+    });
+
+    card.addEventListener('pointermove', function (e) {
+        if (!dragging) return;
+        dx = e.clientX - startX;
+        setCardTransform(dx, 0, false);
+        updateZoneHighlight(dx);
+    });
+
+    function endDrag() {
+        if (!dragging) return;
+        dragging = false;
+        var threshold = 90;
+        if (dx > threshold) {
+            resolve('right');
+        } else if (dx < -threshold) {
+            resolve('left');
+        } else {
+            setCardTransform(0, 0, true);
+            clearZoneHighlight();
+        }
+    }
+
+    card.addEventListener('pointerup', endDrag);
+    card.addEventListener('pointercancel', endDrag);
+
+    /* Tap a zone directly as an alternative to swiping */
+    zoneLeft.addEventListener('click', function () { if (!dragging) resolve('left'); });
+    zoneRight.addEventListener('click', function () { if (!dragging) resolve('right'); });
+
+    /* Arrow-key fallback for desktop */
+    document.addEventListener('keydown', function (e) {
+        if (locked) return;
+        if (e.key === 'ArrowLeft') resolve('left');
+        if (e.key === 'ArrowRight') resolve('right');
+    });
+
+    playAgainLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        location.reload();
+    });
+
+    fetch('data/vocabulary.json')
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            allWords = data.filter(function (w) { return w.hsk === 'HSK2' && w.chinese; });
+            totalWords = allWords.length;
+            queue = shuffle(allWords);
+            correctCount = 0;
+            updateProgress();
+            nextWord();
+        })
+        .catch(function (err) {
+            chineseEl.textContent = '!';
+            pinyinEl.textContent = 'Could not load data/vocabulary.json (run a local server, not file://)';
+            console.error(err);
+        });
+})();
+</script>
+
+</body>
+</html>
